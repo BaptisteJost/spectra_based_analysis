@@ -1,8 +1,8 @@
-import likelihood_SO as l_SO
-import class_faraday as cf
+import bjlib.likelihood_SO as l_SO
+import bjlib.class_faraday as cf
 import numpy as np
 import healpy as hp
-import lib_project as lib
+import bjlib.lib_project as lib
 import copy
 # import pysm
 import pymaster as nmt
@@ -12,9 +12,11 @@ import time
 from astropy import units as u
 from scipy.optimize import minimize
 import numdifftools as nd
-import V3calc as V3
+import bjlib.V3calc as V3
 from mpi4py import MPI
 import bjlib.cl_lib as cl_lib
+import argparse
+import os
 
 
 def main():
@@ -23,18 +25,41 @@ def main():
     nsim = comm.Get_size()
     print(mpi_rank, nsim)
 
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--alpha', type=float, help='birefringence angle in DEGREES',
+                        default=0)
+    # parser.add_argument('--Nsim', type=int, help='number of simulations',
+    #                     default=size)
+    parser.add_argument('--Frequency', type=int, help='Frequency in GHz',
+                        default=93)
+    # parser.add_argument('--path_to_save', type=str,
+    #                     help='Path to saving folder',
+    #                     default='/global/homes/j/jost/these/spectra_based_analysis/results_and_data/')
+
+    args = parser.parse_args()
+
+    # nsim = args.Nsim
+    angle_arg = args.alpha
+    freq_arg = args.Frequency
+    # save_path = args.path_to_save
+    save_path = '/global/homes/j/jost/these/spectra_based_analysis/results_and_data/' +\
+                str(freq_arg)+'GHz_'+str(nsim)+'sim_alpha' +\
+                str(angle_arg).replace('.', 'p')+'deg/'
+    if not os.path.exists(save_path):
+        os.makedirs(save_path)
+
     root = 0
     purify_e = False
-    rotation_angle = (0 * u.deg).to(u.rad)
+    rotation_angle = (angle_arg * u.deg).to(u.rad)
     miscalibration_angle = (0 * u.deg).to(u.rad)
     r = 0.0
     pysm_model = 'c1s0d0'
     f_sky_SAT = 0.1
     sensitivity = 0
     knee_mode = 0
-    BBPipe_path = '/global/homes/j/jost/BBPipe'
-    # BBPipe_path = '/home/baptiste/BBPipe'
-    save_path = '/global/homes/j/jost/these/spectra_based_analysis/results_and_data/192sim_280GHz_alpha0'
+    # BBPipe_path = '/global/homes/j/jost/BBPipe'
+    BBPipe_path = '/home/baptiste/BBPipe'
+    # save_path = '/global/homes/j/jost/these/spectra_based_analysis/results_and_data/192sim_280GHz_alpha0'
 
     norm_hits_map_path = BBPipe_path + '/test_mapbased_param/norm_nHits_SA_35FOV_G_nside512.fits'
     no_inh = False
@@ -63,7 +88,9 @@ def main():
     sky_map = l_SO.sky_map(nside=nside, sky_model=pysm_model)
     sky_map.get_pysm_sky()
     sky_map.get_frequency()
-    frequencies2use = [93]
+    # frequencies2use = [93]
+    frequencies2use = [freq_arg]
+
     frequencies_index = []
     for f in frequencies2use:
         frequencies_index.append(sky_map.frequencies.tolist().index(f))
@@ -228,6 +255,10 @@ def main():
 
         if comm.rank == 0:
             np.save(save_path + 'Cl_noise.npy', Cl_noise)
+            np.save(save_path + 'Cl_dust.npy', Cl_dust)
+            np.save(save_path + 'Cl_sync.npy', Cl_sync)
+            np.save(save_path + 'effective_ells.npy', b.get_effective_ells())
+
             np.save(save_path + 'Cl_cmb.npy', Cl_cmb)
             np.save(save_path + 'Cl_cmb_dust.npy', Cl_cmb_dust)
             np.save(save_path + 'Cl_cmb_sync.npy', Cl_cmb_sync)
