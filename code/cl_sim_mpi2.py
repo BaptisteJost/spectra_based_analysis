@@ -1,10 +1,10 @@
+import os
 import bjlib.likelihood_SO as l_SO
 import bjlib.class_faraday as cf
 import numpy as np
 import healpy as hp
 import bjlib.lib_project as lib
 import copy
-# import pysm
 import pymaster as nmt
 import IPython
 import matplotlib.pyplot as plt
@@ -16,7 +16,6 @@ import bjlib.V3calc as V3
 from mpi4py import MPI
 import bjlib.cl_lib as cl_lib
 import argparse
-import os
 
 
 def main():
@@ -26,7 +25,7 @@ def main():
     print(mpi_rank, nsim)
 
     parser = argparse.ArgumentParser()
-    parser.add_argument('--alpha', type=float, help='birefringence angle in DEGREES',
+    parser.add_argument('--alpha', type=float, help='birefringence angle in DEGREE',
                         default=0)
     # parser.add_argument('--Nsim', type=int, help='number of simulations',
     #                     default=size)
@@ -42,11 +41,13 @@ def main():
     angle_arg = args.alpha
     freq_arg = args.Frequency
     # save_path = args.path_to_save
-    save_path = '/global/homes/j/jost/these/spectra_based_analysis/results_and_data/' +\
+    save_path = '/global/homes/j/jost/these/spectra_based_analysis/results_and_data/noCMB_' +\
                 str(freq_arg)+'GHz_'+str(nsim)+'sim_alpha' +\
                 str(angle_arg).replace('.', 'p')+'deg/'
-    if not os.path.exists(save_path):
-        os.makedirs(save_path)
+
+    if comm.rank == 0:
+        if not os.path.exists(save_path):
+            os.makedirs(save_path)
 
     root = 0
     purify_e = False
@@ -57,8 +58,8 @@ def main():
     f_sky_SAT = 0.1
     sensitivity = 0
     knee_mode = 0
-    # BBPipe_path = '/global/homes/j/jost/BBPipe'
-    BBPipe_path = '/home/baptiste/BBPipe'
+    BBPipe_path = '/global/homes/j/jost/BBPipe'
+    # BBPipe_path = '/home/baptiste/BBPipe'
     # save_path = '/global/homes/j/jost/these/spectra_based_analysis/results_and_data/192sim_280GHz_alpha0'
 
     norm_hits_map_path = BBPipe_path + '/test_mapbased_param/norm_nHits_SA_35FOV_G_nside512.fits'
@@ -182,15 +183,16 @@ def main():
         cmb_map_freq = []
         for f in range(len(frequencies2use)):
             cmb_map = hp.synfast(spectra_cl.cl_rot.spectra.T, nside, new=True)
-            cmb_map_freq.append(cmb_map + noise_maps[f])
-        import os
+            cmb_map_freq.append(cmb_map*0 + 0*noise_maps[f])
+
         import psutil
         process = psutil.Process(os.getpid())
         memory = process.memory_info().rss * u.byte
         print('Memory used = ', memory.to(u.Gbyte))
         print('Memory/size * 32 = ', (memory*32/nsim).to(u.Gbyte))
 
-        del noise_maps
+        # del noise_maps
+
         cmb_map_freq = np.array(cmb_map_freq)
         # cmb_map_nsim = comm.gather(cmb_map_freq, root)
         # cmb_map_nsim = comm.bcast(cmb_map_nsim, root)
@@ -233,17 +235,17 @@ def main():
         Cl_cmb = cl_lib.get_nsim_freq_cl_mpi(mask*cmb_map_nsim, nsim, frequencies_index, mask,
                                              mask_apo, purify_e, purify_b, wsp)
         cmb_dust_map = np.add(cmb_map_nsim, dust_map_freq)
-        Cl_cmb_dust = cl_lib.get_nsim_freq_cl_mpi(mask*cmb_dust_map, nsim,
+        Cl_cmb_dust = cl_lib.get_nsim_freq_cl_mpi(mask*cmb_dust_map + mask*noise_maps[0], nsim,
                                                   frequencies_index, mask, mask_apo,
                                                   purify_e, purify_b, wsp)
 
         cmb_sync_map = np.add(cmb_map_nsim, sync_map_freq)
-        Cl_cmb_sync = cl_lib.get_nsim_freq_cl_mpi(mask*cmb_sync_map, nsim,
+        Cl_cmb_sync = cl_lib.get_nsim_freq_cl_mpi(mask*cmb_sync_map+mask*noise_maps[0], nsim,
                                                   frequencies_index, mask, mask_apo,
                                                   purify_e, purify_b, wsp)
 
         cmb_dust_sync_map = np.add(cmb_dust_map, sync_map_freq)
-        Cl_cmb_dust_sync = cl_lib.get_nsim_freq_cl_mpi(mask*cmb_dust_sync_map, nsim,
+        Cl_cmb_dust_sync = cl_lib.get_nsim_freq_cl_mpi(mask*cmb_dust_sync_map+mask*noise_maps[0], nsim,
                                                        frequencies_index, mask, mask_apo,
                                                        purify_e, purify_b, wsp)
         print('time for Cl estimation of of different component maps = ',
@@ -263,8 +265,36 @@ def main():
             np.save(save_path + 'Cl_cmb_dust.npy', Cl_cmb_dust)
             np.save(save_path + 'Cl_cmb_sync.npy', Cl_cmb_sync)
             np.save(save_path + 'Cl_cmb_dust_sync.npy', Cl_cmb_dust_sync)
+        Cl_noise_nsim = None
+        Cl_cmb_nsim = None
+        Cl_cmb_dust_nsim = None
+        Cl_cmb_sync_nsim = None
+        Cl_cmb_dust_sync_nsim = None
 
-        # IPython.embed()
+        if comm.rank == 0:
+            shape_clsim = [nsim, Cl_noise.shape[0], Cl_noise.shape[1],
+                           Cl_noise.shape[2]]
+
+            Cl_noise_nsim = np.empty(shape_clsim)
+            Cl_cmb_nsim = np.empty(shape_clsim)
+            Cl_cmb_dust_nsim = np.empty(shape_clsim)
+            Cl_cmb_sync_nsim = np.empty(shape_clsim)
+            Cl_cmb_dust_sync_nsim = np.empty(shape_clsim)
+    comm.Gather(Cl_noise, Cl_noise_nsim, root)
+    comm.Gather(Cl_cmb, Cl_cmb_nsim, root)
+    comm.Gather(Cl_cmb_dust, Cl_cmb_dust_nsim, root)
+    comm.Gather(Cl_cmb_sync, Cl_cmb_sync_nsim, root)
+    comm.Gather(Cl_cmb_dust_sync, Cl_cmb_dust_sync_nsim, root)
+
+    if comm.rank == 0:
+        np.save(save_path + 'Cl_noise_nsim.npy', Cl_noise_nsim)
+        np.save(save_path + 'Cl_cmb_nsim.npy', Cl_cmb_nsim)
+        np.save(save_path + 'Cl_cmb_dust_nsim.npy', Cl_cmb_dust_nsim)
+        np.save(save_path + 'Cl_cmb_sync_nsim.npy', Cl_cmb_sync_nsim)
+        np.save(save_path + 'Cl_cmb_dust_sync_nsim.npy', Cl_cmb_dust_sync_nsim)
+        del Cl_noise_nsim, Cl_cmb_nsim, Cl_cmb_dust_nsim, Cl_cmb_sync_nsim
+        del Cl_cmb_dust_sync_nsim
+    exit()
 
     fl_plt_Cl1sp = 0
     if fl_plt_Cl1sp:
@@ -379,7 +409,7 @@ def main():
         likelihood_minimised_model = minimize(
             cf.likelihood_for_hessian_a,    0.001,
             (spectra_cl, data_model_matrix, b, nside, f_sky_SAT),
-            jac=jac_n2logL)
+            jac=cl_lib.jac_n2logL)
         H_model_ = nd.Hessian(cf.likelihood_for_hessian_a)(
             likelihood_minimised_model.x,
             spectra_cl, data_model_matrix, b,
@@ -405,7 +435,7 @@ def main():
             minimisation_init=0.001,
             compute_error68=False, step_size=1e-5, output_grid=False)
         fit_alpha_cmb_dust_sync, H_cmb_dust_sync = cl_lib.min_and_error_nsim_freq_mpi(
-            spectra_cl, Cl_cmb_sync, nsim, frequencies_index, b, nside, f_sky_SAT,
+            spectra_cl, Cl_cmb_dust_sync, nsim, frequencies_index, b, nside, f_sky_SAT,
             spectra_used='all', spectra_indexation='NaMaster',
             minimisation_init=0.001,
             compute_error68=False, step_size=1e-5, output_grid=False)
